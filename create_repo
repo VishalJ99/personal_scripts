@@ -1,0 +1,287 @@
+#!/bin/bash
+##################################################
+# This script creates a blank Python repository: #
+##################################################
+
+# Set the repository name
+# check if a name has been specified
+# if not, exit with error
+repo_name=$1
+if [ -z $repo_name ]; then
+    echo "Name is empty"
+    echo "Usage is:"
+    echo "./create_repo.sh <repo_name>"
+    exit 1
+fi
+echo "Creating blank Python repository '$repo_name'..."
+echo "**********************************************"
+
+# Create the repository directory
+echo "Creating directory structure..."
+echo "**********************************************"
+mkdir $repo_name
+cd $repo_name || exit 1
+
+mkdir src
+mkdir test
+mkdir docs
+mkdir output
+
+echo "Creating gitignore file..."
+echo "**********************************************"
+# create the gitignore file
+touch .gitignore
+echo "# Cache and Testing">>.gitignore
+echo "__pycache__/">>.gitignore
+echo "*.py[cod]">>.gitignore
+echo "*.pytest">>.gitignore
+echo "">>.gitignore
+echo "# Folders">>.gitignore
+echo "output/">>.gitignore
+echo "docs/">>.gitignore
+
+echo "Creating pre-commit config file..."
+echo "**********************************************"
+# Create the pre-commit config file
+# standard pre-commit hooks + Black + Black Jupyter + flake8
+touch .pre-commit-config.yaml
+echo "repos:">>.pre-commit-config.yaml
+echo "  - repo: https://github.com/pre-commit/pre-commit-hooks">>.pre-commit-config.yaml
+echo "    rev: v4.0.1">>.pre-commit-config.yaml
+echo "    hooks:">>.pre-commit-config.yaml
+echo "      - id: check-yaml">>.pre-commit-config.yaml
+echo "      - id: end-of-file-fixer">>.pre-commit-config.yaml
+echo "      - id: trailing-whitespace">>.pre-commit-config.yaml
+echo "      - id: mixed-line-ending">>.pre-commit-config.yaml
+echo "      - id: debug-statements">>.pre-commit-config.yaml
+echo "  - repo: https://github.com/psf/black">>.pre-commit-config.yaml
+echo "    rev: 23.11.0">>.pre-commit-config.yaml
+echo "    hooks:">>.pre-commit-config.yaml
+echo "      - id: black">>.pre-commit-config.yaml
+echo "        language_version: python3.9">>.pre-commit-config.yaml
+echo "      - id: black-jupyter">>.pre-commit-config.yaml
+echo "        language_version: python3.9">>.pre-commit-config.yaml
+echo "  - repo: https://github.com/pycqa/flake8">>.pre-commit-config.yaml
+echo "    rev: 6.0.0">>.pre-commit-config.yaml
+echo "    hooks:" >>.pre-commit-config.yaml
+echo "      - id: flake8">>.pre-commit-config.yaml
+echo "        exclude: ^(docs/|report/)" >>.pre-commit-config.yaml
+echo "  - repo: local">>.pre-commit-config.yaml
+echo "    hooks:" >>.pre-commit-config.yaml
+echo "      - id: testing">>.pre-commit-config.yaml
+echo "        name: testing">>.pre-commit-config.yaml
+echo "        entry: pytest">>.pre-commit-config.yaml
+echo "        language: system">>.pre-commit-config.yaml
+echo "        files: ^test/">>.pre-commit-config.yaml
+echo "        always_run: true">>.pre-commit-config.yaml
+
+
+# Create the conda enviroment and install the basics
+if hash conda 2>/dev/null; then
+    echo "Conda installed, continuing..."
+else
+    echo "Conda not installed, exiting..."
+    exit 1
+fi
+# chose if you want to create a new conda environment or use an existing one
+read -p "Create new Conda Environment with standard packages? (y/n)" -n 1 -r
+echo "**********************************************"
+
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo "Building new conda environment..."
+    conda create -n $repo_name \
+        pre-commit \
+        pytest \
+        black \
+        flake8 \
+        numpy \
+        pandas \
+        matplotlib \
+        scipy \
+        sphinx
+    conda env export -n $repo_name -f environment.yml --no-builds --from-history # export the environment that will work on any OS
+elif [[ $REPLY =~ ^[Nn]$ ]]; then
+    read -p "Use existing Conda Environment? (y/n)" -n 1 -r
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        read -p "Specify environment to use:" conda_env
+        conda env export -n $conda_env -f environment.yml --no-builds --from-history
+    elif [[ $REPLY =~ ^[Nn]$ ]]; then
+        echo "No conda enviroment specified, exiting..."
+        exit 1
+    else
+        echo "Invalid input, exiting..."
+        exit 1
+    fi
+else
+    echo "Invalid input, exiting..."
+    exit 1
+fi
+
+# Delete prefix line in environment.yml
+sed -i '' '/prefix/d' environment.yml
+
+echo "**********************************************"
+echo "Installing pre-commit hooks..."
+echo "**********************************************"
+# set up pre-commit (this requires pre-commit to be installed in root environment)
+# it is a massive pain to activate the conda environment in a bash script
+
+if hash pre-commit 2>/dev/null; then # check if pre-commit is installed
+    pre-commit install
+else
+    echo "Pre-commit not installed, skipping..."
+fi
+
+
+echo "Set up Sphinx documentation..."
+echo "**********************************************"
+echo "Setting up Sphinx documentation..."
+echo "**********************************************"
+# Navigate to the docs directory
+cd docs || exit
+
+# Run sphinx-quickstart non-interactively
+sphinx-quickstart --quiet \
+    --project "$repo_name" \
+    --author "Vishal Jain" \
+    --release "0.1" \
+    --language "en" \
+    --makefile \
+    --batchfile \
+    --sep \
+    --ext-autodoc \
+    --ext-viewcode \
+    --ext-todo \
+    --ext-githubpages
+
+# Modify conf.py to include custom Sphinx extensions and themes
+python -c "
+import re
+
+conf_path = 'source/conf.py'
+with open(conf_path, 'r') as file:
+    conf_contents = file.read()
+
+# Uncomment 'import os' and 'import sys' if they are commented out
+conf_contents = re.sub('# import os', 'import os', conf_contents)
+conf_contents = re.sub('# import sys', 'import sys', conf_contents)
+
+# Check if sys.path.insert line is already there, if not, add it after 'import sys'
+path_insert_line = \"sys.path.insert(0, os.path.abspath('../src'))\"
+if path_insert_line not in conf_contents:
+    conf_contents = re.sub(r'(import sys\\n)', r'\\1' + path_insert_line + '\\n', conf_contents)
+
+# Ensure necessary Sphinx extensions are enabled
+extensions = [
+    'sphinx_rtd_theme',
+    'sphinx_autodoc_typehints',
+    'sphinxcontrib.napoleon',
+    'sphinx_autosummary',
+]
+extensions_pattern = r\"extensions = \\[([^\\]]*)\\]\"
+match = re.search(extensions_pattern, conf_contents)
+if match:
+    existing_extensions = match.group(1)
+    for extension in extensions:
+        if extension not in existing_extensions:
+            # Add the extension at the end of the extensions list, before the closing bracket
+            conf_contents = re.sub(extensions_pattern, r\"extensions = [\\1    '\" + extension + \"',\\n\", conf_contents)
+else:
+    # If the extensions list does not exist, add it after project information
+    extensions_str = \"extensions = [\\n    '\" + \"',\\n    '\".join(extensions) + \"',\\n]\\n\"
+    conf_contents = re.sub(r\"(# -- Project information -----------------------------------------------------\\n)\", r\"\\1\" + extensions_str, conf_contents)
+
+with open(conf_path, 'w') as file:
+    file.write(conf_contents)
+"
+
+# Go back to the root directory of your project
+cd ..
+
+echo "Sphinx documentation setup complete."
+echo "Run 'make html' inside the docs directory to generate your documentation."
+echo "**********************************************"
+
+
+
+echo "Creating README file..."
+echo "**********************************************"
+# Create blank README file
+touch README.md
+echo "**********************************************">>README.md
+echo "* $repo_name">>README.md
+echo "**********************************************">>README.md
+echo "">>README.md
+echo "## Description">>README.md
+echo "">>README.md
+echo "## Installation">>README.md
+echo "">>README.md
+echo "## Usage">>README.md
+echo "">>README.md
+echo "## Contributing">>README.md
+echo "">>README.md
+echo "## License">>README.md
+echo "">>README.md
+echo "## Author">>README.md
+echo "Vishal Jain">>README.md
+echo $(date '+%Y-%m-%d')>>README.md
+
+
+echo "Creating Containerisation Files..."
+echo "**********************************************"
+
+# Build basic Dockerfile
+touch Dockerfile
+# use basic miniconda image
+echo "FROM continuumio/miniconda3" >> Dockerfile
+echo "" >> Dockerfile
+# create project directory
+echo "RUN mkdir -p $repo_name" >> Dockerfile
+echo "" >> Dockerfile
+# copy the repository in
+echo "COPY . /$repo_name" >> Dockerfile
+echo "WORKDIR /$repo_name" >> Dockerfile
+echo "" >> Dockerfile
+# install the conda environment
+echo "RUN conda env update --file environment.yml" >> Dockerfile
+echo "" >> Dockerfile
+# activate the conda environment
+# can't do it with dockerfile
+# instead we have to edit bashrc to load it on login
+echo "RUN echo \"conda activate $repo_name\" >> ~/.bashrc" >> Dockerfile
+echo "SHELL [\"/bin/bash\", \"--login\", \"-c\"]" >> Dockerfile
+echo "" >> Dockerfile
+# as we are in the conda enviroment we can install pre-commit hooks
+echo "RUN pre-commit install" >> Dockerfile
+
+echo "Creating Git repository..."
+echo "**********************************************"
+# Initialize the Git repository
+if hash git 2>/dev/null; then # check if git is installed
+    git init
+    git add .
+    git commit -m "Initial commit"
+else
+    echo "Git not installed, exiting..."
+    exit 1
+fi
+
+echo "Creating remote repository..."
+echo "**********************************************"
+echo "$repo_name"
+# Create the repository on GitHub (assuming you have the GitHub CLI installed)
+# could also use GitLab or BitBucket CLI
+if hash gh 2>/dev/null; then # check if GitHub CLI is installed
+    gh repo create $repo_name --public --source=. --remote=upstream
+    # Push the initial commit to the remote repository
+    git push --set-upstream upstream main
+
+else
+    echo "GitHub CLI not installed, skipping GitHub repository creation..."
+fi
+
+# Display success message
+echo "**********************************************"
+echo "Blank Python repository created successfully!"
+echo "**********************************************"
+
